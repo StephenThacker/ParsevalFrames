@@ -157,9 +157,6 @@ def funmin(a, B1):
     return Bmat, x
 
 
-# --------------------------
-# Example usage (Example 4.3)
-# --------------------------
 if __name__ == "__main__":
     a = np.array([1, 2, 1, 2, 4, 2, 1, 2, 1]) / 16.0
     print("a", a)
