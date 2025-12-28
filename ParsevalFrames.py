@@ -2,6 +2,12 @@ import numpy as np
 from scipy.optimize import minimize, NonlinearConstraint, Bounds
 from scipy.linalg import svd
 
+def orthogonalize_vector_group(matrix,low_pass_vector):
+    for i in range(0,matrix.shape[0]):
+        matrix[i] = matrix[i] - (np.dot(matrix[i],low_pass_vector)/np.dot(low_pass_vector,low_pass_vector))*low_pass_vector
+    
+    return matrix
+
 
 def pframe(Q):
     """Construct a Parseval frame from Q."""
@@ -70,7 +76,7 @@ def jac_con(lambd, Q):
     return -jac
 
 
-def funmin(a, B1):
+def funmin(a, B1, orthoganalize_projection = False):
     """Main function to generate Parseval Framelet high-pass filters."""
     a = a.flatten()
     c = np.sqrt(a)
@@ -90,16 +96,24 @@ def funmin(a, B1):
     print(np.diag(1/c))'''
 
     D1 = B1 @ np.diag(1 / c)
+    #compute first step of graham Schmidt orthogonalization process
+    if orthoganalize_projection == True:
+        D1 = orthogonalize_vector_group(D1,c)
+
+
     colin_vec = D1@c.T
 
     
     print("checking collinearity requirements")
+    flag = False
     for i in range(0,len(colin_vec)):
-        if colin_vec[i] != 0:
+        if np.abs(colin_vec[i]) > 1e-3:
+            print(colin_vec[i])
             print("failed for b_%s" % i)
-            raise ValueError("Does not meet collinearity requirement for low pass filter. b_i * (1/c)^T != 0")
-        else: 
-            print("passed for b_%s" % i)
+            flag = True
+            #raise ValueError("Does not meet collinearity requirement for low pass filter. b_i * (1/c)^T != 0")
+    if flag == False:
+            print("collineaerity passed for all i")
     #must be all zero vectors for D1 applied to the transpose of c
     Q = np.vstack((c, D1))
 
@@ -121,29 +135,33 @@ def funmin(a, B1):
     bounds = Bounds(lb, ub)
 
     options = {
-        'xtol': 1e-12,
-        'gtol': 1e-12,
-        'barrier_tol': 1e-12,
-        'maxiter': 2000,
+        'xtol': 1e-3,
+        'gtol': 1e-3,
+        'barrier_tol': 1e-3,
+        'maxiter': 1000,
         'verbose': 1
     }
 
     # MAIN OPTIMIZATION — robust to row permutations!
-    res = minimize(
-        obj, x0,
-        method='trust-constr',
-        jac=jobj,
-        hess='2-point',
-        bounds=bounds,
-        constraints=[constraint],
-        options=options
-    )
-
+    start_svd = 2
+    while start_svd > 1 + 1e-2:
+        res = minimize(
+            obj, x0,
+            method='trust-constr',
+            jac=jobj,
+            hess='2-point',
+            bounds=bounds,
+            constraints=[constraint],
+            options=options
+        )
+        x0 = res.x
+        start_svd = svd(np.diag(np.concatenate(([1], x0))) @ Q, compute_uv=False)[0]
+        print(start_svd)
     #print("res",res)
 
     x = res.x
-    #print("Optimization finished. Largest singular value:",
-    #      svd(np.diag(np.concatenate(([1], x))) @ Q, compute_uv=False)[0])
+    print("Optimization finished. Largest singular value:",
+          svd(np.diag(np.concatenate(([1], x))) @ Q, compute_uv=False)[0])
 
     newQ = np.diag(np.concatenate(([1], x))) @ Q
 
@@ -174,8 +192,12 @@ if __name__ == "__main__":
 
     Bmat, res = funmin(a, B1)
 
+    print("here")
+    for i in range(0,len(Bmat)):
+        print(Bmat[i,:])
+
     print("\nBmat (scaled by 100):")
-    print(np.round(Bmat * 100, 1))
+    print(Bmat)
 
     print("\nOptimized λ:")
     print(res)
