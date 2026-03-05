@@ -36,6 +36,12 @@ def one_d_double_convolution_reconstruction(func_vec,filters):
 
     return {"function_decomp" :function_array, "reconstr_func" : reconstructed_function, "orig_funct" : func_vec, "error": np.linalg.norm(func_vec-reconstructed_function)}
 
+def single_filter_reconstruction_error(func_vec, filter):
+    f_conv = signal.convolve(func_vec,filter, mode = "same")
+    reconstructed_func = signal.convolve(f_conv,filter,mode = 'same')
+
+    return empirical_reconstruction_error(func_vec,reconstructed_func)
+
 def empirical_reconstruction_error(original_function,reconstr_function):
     return np.linalg.norm(original_function-reconstr_function)
 
@@ -76,16 +82,69 @@ def binomial_expansion_coefficients(a,b,arg1,arg2,denom,n):
 
     return results_dict
 
+#sigma_vector is a single parameter
+#lambda_vector and psi_vector are lists which determine the parameters of the functions and
+#are assumed to be the same length.
+def define_cosine_filters(x_vector,sigma_vector,lambda_vector,psi_vector):
+    function_list = []
+
+    for i in range(0,len(lambda_vector)):
+        function_list += [np.exp(-x_vector**2 / (2 * sigma_vector**2)) * np.cos(2 * np.pi * x_vector / lambda_vector[i] + psi_vector[i])]
+
+    return function_list
+
+def define_sine_filters(x_vector,sigma_vector,lambda_vector, psi_vector):
+    function_list = []
+    for i in range(0,len(lambda_vector)):
+        function_list += [np.exp(-x_vector**2 / (2 * sigma_vector**2)) * np.sin(2 * np.pi * x_vector / lambda_vector[i] + psi_vector[i])]
+
+    return function_list
+
+#Greedy algorithm to preselect which filters have the best chance of reconstructing the image.
+#Step1: identify which filter has the largest contribution (i.e, the smallest reconstruction error)
+#Identify which parameter optimizes that filter
+#Remove filter and parameter from list
+#Continue until no more filters
+#Need to use a fast algorithm because total possibilities are Num_of_filters^{Num of Paramaters}, which is likely larger
+#than the number of all atoms in the universe.
+def preselect_filters(filter_matrix, function, x_vector,lambda_list):
+
+    def reconstruction_error(high_pass_filt):
+        f_conv = signal.convolve(function,high_pass_filt, mode = "same")
+        reconstructed_func = signal.convolve(f_conv,high_pass_filt,mode = 'same')
+        error = np.linalg.norm(function - reconstructed_func)
+
+        return error
+    
+    recon_errors = [(filt,reconstruction_error(filt)) for filt in filter_matrix]
+    error_sorted_filts = sorted(recon_errors, key = lambda tup:tup[1])
+
+    sorted_filters_only = [tup[0] for tup in error_sorted_filts]
+
+    f_conv = signal.convolve(function,sorted_filters_only[-1], mode = "same")
+    reconstructed_func = signal.convolve(f_conv,sorted_filters_only[-1],mode = 'same')
+
+    plt.plot(x_vector ,reconstructed_func, alpha = 0.3)
+
+    plt.plot(x_vector,function,alpha = 0.2)
+    plt.show()
+
+    return
+
+
+class GaborFilter():
+
+    def __init(self, x_arrays, sigma_array, lambda_array,psi_array):
+
+
+
+
 
 
 if __name__ == "__main__":
 
 
     low_pass_filter_dict = binomial_expansion_coefficients(1,1,2,0,2,16)
-    print("low pass filter coef")
-    print(np.array(low_pass_filter_dict["int_coef"]))
-    print("denom")
-    print(low_pass_filter_dict["denom"])
     low_pass_filter = np.array(low_pass_filter_dict["int_coef"])*(1/low_pass_filter_dict["denom"])
     x_vector = np.linspace(start = -9,stop = 9, num = 17)
 
@@ -93,88 +152,48 @@ if __name__ == "__main__":
     sigma2 = 2
     sigma3 = 3
 
-    lambda1 = 0.1
-    lambda2 = 0.2
-    lambda3 = 0.3
-    lambda4 = 0.4
+    lambda_vec_init = [0.1,0.2,0.3,0.4]
+    psi_vec_init = [0, np.pi/4]
 
-    psi1 = 0
-    psi2 = np.pi / 4
+    cos_lambda_array = [x for x in lambda_vec_init for _ in range(2)]
+    cos_psi_array = psi_vec_init*4
+        
+    sin_lambda_array_1 = [x for x in lambda_vec_init for _ in range(2)]
+    sin_psi_array_1 = psi_vec_init*4
+
+    sin_lambda_array_2 = [x for x in lambda_vec_init for _ in range(6)]
+    sin_psi_array_2 = psi_vec_init*12
 
     # Define x arrays
     x1 = np.linspace(-3, 3, 17)
     x2 = np.linspace(-6, 6, 17)
     x3 = np.linspace(-9, 9, 17)
 
-    # Generate cosine filters (g1 to g8)
-    g1 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / lambda1 + psi1)
-    g2 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / (lambda1 - 0.2) + psi2)
-    g3 = np.exp(-x1**2 / (2 * (sigma1 - 0.5)**2)) * np.cos(2 * np.pi * x1 / lambda2 + psi1)
-    g4 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / lambda2 + psi2)
-    g5 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / lambda3 + psi1)
-    g6 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / lambda3 + psi2)
-    g7 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / lambda4 + psi1)
-    g8 = np.exp(-x1**2 / (2 * sigma1**2)) * np.cos(2 * np.pi * x1 / lambda4 + psi2)
 
-    # Generate sine filters (h1 to h32)
-    h1 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda1 + psi1)
-    h2 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda1 + psi2)
-    h3 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda2 + psi1)
-    h4 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda2 + psi2)
-    h5 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda3 + psi1)
-    h6 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda3 + psi2)
-    h7 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda4 + psi1)
-    h8 = np.exp(-x2**2 / (2 * sigma2**2)) * np.sin(2 * np.pi * x2 / lambda4 + psi2)
-    h9 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda1 + psi1)
-    h10 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda1 + psi2)
-    h11 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda2 + psi1)
-    h12 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda2 + psi2)
-    h13 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda3 + psi1)
-    h14 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda3 + psi2)
-    h15 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda4 + psi1)
-    h16 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda4 + psi2)
-    h17 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda1 + psi1)
-    h18 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda1 + psi2)
-    h19 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda2 + psi1)
-    h20 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda2 + psi2)
-    h21 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda3 + psi1)
-    h22 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda3 + psi2)
-    h23 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda4 + psi1)
-    h24 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda4 + psi2)
-    h25 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda1 + psi1)
-    h26 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda1 + psi2)
-    h27 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda2 + psi1)
-    h28 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda2 + psi2)
-    h29 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda3 + psi1)
-    h30 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda3 + psi2)
-    h31 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda4 + psi1)
-    h32 = np.exp(-x3**2 / (2 * sigma3**2)) * np.sin(2 * np.pi * x3 / lambda4 + psi2)
+    cos_filter_bank = define_cosine_filters(x1,sigma1,cos_lambda_array,cos_psi_array)
+    sin_filter_bank_1 = define_sine_filters(x2,sigma2, sin_lambda_array_1, sin_psi_array_1)
+    sin_filter_bank_2 = define_sine_filters(x3,sigma3, sin_lambda_array_2,sin_psi_array_2)
 
-    # Construct GaborMatrix
-    high_pass_filters = np.array([
-        g1, g2, g3, g4, g5, g6, g7, g8,
-        h1, h2, h3, h4, h5, h6, h7, h8,
-        h9, h10, h11, h12, h13, h14, h15, h16,
-        h17, h18, h19, h20, h21, h22, h23, h24,
-        h25, h26, h27, h28, h29, h30, h31, h32
-    ])
+    high_pass_filters = np.vstack([cos_filter_bank,sin_filter_bank_1,sin_filter_bank_2])
+
+    x= np.linspace(-2,2,24000)
+    f = ((x**2)*np.sin(x**-2))/(np.exp((0.01)*(x**2)))
+
+    print(preselect_filters(high_pass_filters, f,x))
 
     for i in range(0,len(high_pass_filters)):
         high_pass_filters[i] = high_pass_filters[i] - np.mean(high_pass_filters[i])
         
 
     Bmat, res = ParsevalFrames.funmin(low_pass_filter,high_pass_filters,orthoganalize_projection=False)
-    print(type(Bmat))
 
-    print("length")
-    print(len(Bmat))
 
-    x= np.linspace(-2,2,24000)
-    f = ((x**2)*np.sin(x**-2))/(np.exp((0.01)*(x**2)))
     reconstr_dict = one_d_double_convolution_reconstruction(f,Bmat)
 
 
     reconstr_dict_orig = one_d_double_convolution_reconstruction(f,np.vstack((low_pass_filter,high_pass_filters)))
+
+    
 
     print("reconstruction error with filters", reconstr_dict["error"]/np.linalg.norm(f))
     print("reconstruction error of original", reconstr_dict_orig["error"])
@@ -192,6 +211,8 @@ if __name__ == "__main__":
 
     print("\nOptimized λ:")
     print(res)
+
+
 
 
 
@@ -329,5 +350,3 @@ if __name__ == "__main__":
     plt.show()
     plt.plot(x_vector_periodized_1, periodized_function_sin_1)
     plt.show()'''
-
-
