@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from itertools import combinations, permutations
 from scipy.special import comb 
 from scipy import signal
+from scipy.optimize import minimize_scalar
 
 def periodize_function_1d(unperiodized_function, number_ouput_coefficients,number_of_stack_layers):
     if len(unperiodized_function)%number_ouput_coefficients != 0:
@@ -125,7 +126,7 @@ def define_sine_functions(x_vector,sigma_vector, psi_vector):
 #Continue until no more filters
 #Need to use a fast algorithm because total possibilities are Num_of_filters^{Num of Paramaters}, which is likely larger
 #than the number of all atoms in the universe.
-def preselect_filters(filter_matrix, targ_function, x_vector, lambda_universe, filter_func_list):
+def preselect_filters(filter_matrix, targ_function, lambda_universe, filter_func_list):
 
     def reconstruction_error(high_pass_filt):
         f_conv = signal.convolve(targ_function,high_pass_filt, mode = "same")
@@ -178,7 +179,7 @@ def preselect_filters(filter_matrix, targ_function, x_vector, lambda_universe, f
 #Step 4: Subtract from the residual, Iterate this process until all filters are been optimized.
 #Idea: Should we also consider a way to do this where this process is somehow automated.
 #Is there a way to do it where We just give it Sin and Cos and it finds the right combination that optimizes the selections?
-def preselect_filters_OBP(filter_matrix, targ_function, x_vector, lambda_universe, filter_func_list):
+def preselect_filters_OBP(filter_matrix, targ_function, lambda_universe, filter_func_list):
 
     def convolution_norm(high_pass_filt):
         f_conv = signal.convolve(targ_function,high_pass_filt, mode = "same")
@@ -193,6 +194,19 @@ def preselect_filters_OBP(filter_matrix, targ_function, x_vector, lambda_univers
         resid_num = np.linalg.norm(func - normalized_f)
         return [resid_func, resid_num]
     
+    def coefficient_optimization_scalar(alpha,current_resid,high_pass_filt):
+        scaled_high_pass = alpha*high_pass_filt
+        f_conv = signal.convolve(current_resid,scaled_high_pass, mode = "same")
+        f_double = signal.convolve(f_conv,scaled_high_pass, mode = "same")
+        new_residual = current_resid - f_double
+        return np.linalg.norm(new_residual)
+    
+    def calculate_resid(current_resid,high_pass_filt):
+        f_conv = signal.convolve(current_resid,high_pass_filt, mode = "same")
+        f_double = signal.convolve(f_conv,high_pass_filt, mode = "same")
+        new_residual = current_resid - f_double
+        return new_residual
+    
     recon_norms = [(filt, convolution_norm(filt),func) for filt,func in zip(filter_matrix,filter_func_list)]
     norm_sorted_filts = sorted(recon_norms, key = lambda tup:tup[1], reverse=True)
 
@@ -200,17 +214,31 @@ def preselect_filters_OBP(filter_matrix, targ_function, x_vector, lambda_univers
     new_high_pass_list = []
     resid = targ_function
     for i in range(0,len(norm_sorted_filts)):
-        max_lambda = []
-        for j in range(0,lambda_universe):
+        max_filt_lambda = []
+        for j in range(0,len(lambda_universe)):
+            lamb_j = lambda_universe[j]            
             #retrives the highpass filter associated with lambda[j]
-            lamb_j = lambda_universe[j]
             coeff_j = norm_sorted_filts[i][2](lamb_j)
             resid_func, resid_num = reconstruction_norm_scaled(coeff_j,resid)
-            max_lambda.append((coeff_j, resid_func, resid_num))
-        sorted(max_lambda, key = lambda tup: tup[2], reverse=True)
-        new_high_pass, resid_func,resid_num = max_lambda[0]
-        new_high_pass_list.append(new_high_pass)
+            max_filt_lambda.append((coeff_j, resid_func, resid_num,j))
+        max_filt_lambda = sorted(max_filt_lambda, key = lambda tup: tup[2])
+        unscaled_new_high_pass, resid_func,resid_num,lambda_j = max_filt_lambda[0]
+        lambda_universe.pop(lambda_j)
+        print("max_lambda")
+        print(resid_num)
+
         #Need to add sub-routine here that optimizes the scalar for the projection
+
+        optimiz_result = minimize_scalar(coefficient_optimization_scalar,args=(resid,unscaled_new_high_pass))
+        alpha = optimiz_result.x
+        scaled_new_high_pass = alpha*unscaled_new_high_pass
+        print("alpha")
+        print(alpha)
+        new_high_pass_list.append(unscaled_new_high_pass)
+        adjusted_resid = calculate_resid(resid,scaled_new_high_pass)
+        resid = adjusted_resid
+
+    return np.array(new_high_pass_list)
 
     """f_conv = signal.convolve(targ_function,sorted_filters_only[0], mode = "same")
     reconstructed_func = signal.convolve(f_conv,sorted_filters_only[0],mode = 'same')
@@ -243,7 +271,7 @@ if __name__ == "__main__":
     sigma2 = 2
     sigma3 = 3
 
-    lambda_vec_init = [0.1,0.2,0.3,0.4]
+    lambda_vec_init = [0.01,0.2,0.3,0.4]
     psi_vec_init = [0, np.pi/4]
 
     cos_lambda_array = [x for x in lambda_vec_init for _ in range(2)]
@@ -260,9 +288,9 @@ if __name__ == "__main__":
     x2 = np.linspace(-6, 6, 17)
     x3 = np.linspace(-9, 9, 17)
 
-    lambda_step  = 0.15/10
+    lambda_step  = 0.05
 
-    lambda_universe = [lambda_step*i + 0.5*lambda_vec_init[0] for i in range(300)]
+    lambda_universe = [lambda_step*i + 0.5*lambda_vec_init[0] for i in range(400)]
 
 
     cos_filter_bank = define_cosine_filters(x1,sigma1,cos_lambda_array,cos_psi_array)
@@ -283,8 +311,8 @@ if __name__ == "__main__":
     for i in range(0,len(high_pass_filters)):
         high_pass_filters[i] = high_pass_filters[i] - np.mean(high_pass_filters[i])
 
-
-    high_pass_filters = preselect_filters(high_pass_filters, f, x, lambda_universe, high_pass_functions)
+    
+    high_pass_filters = preselect_filters_OBP(high_pass_filters, f, lambda_universe, high_pass_functions)
 
     for i in range(0,len(high_pass_filters)):
         high_pass_filters[i] = high_pass_filters[i] - np.mean(high_pass_filters[i])
@@ -453,6 +481,10 @@ if __name__ == "__main__":
 
     plt.plot(x_vector_periodized_1,periodized_function_cos_1)
     plt.show()
+    plt.plot(x_vector_periodized_1, periodized_function_sin_1)
+    plt.show()'''
+
+
     plt.plot(x_vector_periodized_1, periodized_function_sin_1)
     plt.show()'''
 
