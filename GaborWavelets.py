@@ -98,7 +98,7 @@ def define_cosine_functions(x_vector,sigma_vector,psi_vector):
     function_list = []
 
     for i in range(0,len(psi_vector)):
-        function_list += [lambda lambda_coeff : np.exp(-x_vector**2 / (2 * sigma_vector**2)) * np.cos(2 * np.pi * x_vector / lambda_coeff + psi_vector[i])]
+        function_list += [lambda lambda_coeff, psi_vec = psi_vector[i] : np.exp(-x_vector**2 / (2 * sigma_vector**2)) * np.cos(2 * np.pi * x_vector / lambda_coeff + psi_vec)]
 
     return function_list
 
@@ -113,7 +113,7 @@ def define_sine_filters(x_vector,sigma_vector,lambda_vector, psi_vector):
 def define_sine_functions(x_vector,sigma_vector, psi_vector):
     function_list = []
     for i in range(0,len(psi_vector)):
-        function_list += [lambda lambda_coeff: np.exp(-x_vector**2 / (2 * sigma_vector**2)) * np.sin(2 * np.pi * x_vector / lambda_coeff + psi_vector[i])]
+        function_list += [lambda lambda_coeff, psi_vec = psi_vector[i]: np.exp(-x_vector**2 / (2 * sigma_vector**2)) * np.sin(2 * np.pi * x_vector / lambda_coeff + psi_vec)]
 
     return function_list
 
@@ -142,22 +142,27 @@ def preselect_filters(filter_matrix, targ_function, x_vector, lambda_universe, f
         return norm
     
     recon_norms = [(filt, reconstructed_norm(filt),func) for filt,func in zip(filter_matrix,filter_func_list)]
-    norm_sorted_filts = sorted(recon_norms, key = lambda tup:tup[1])
+    norm_sorted_filts = sorted(recon_norms, key = lambda tup:tup[1], reverse=True)
 
     sorted_filters_only = [tup[0] for tup in norm_sorted_filts]
 
     remaining_filters = norm_sorted_filts
     #greedy algorithm
     optimized_filters = []
+    resolved_coeffs = []
     for i in range(0,len(remaining_filters)):
         coeff, norm, func = remaining_filters[i]
         coeff_list = []
         for j in range(0,len(lambda_universe)):
-            coeff_list += [(reconstructed_norm(func(lambda_universe[j])),func(lambda_universe[j]),j)]
+            coeff_list += [(reconstructed_norm(func(lambda_universe[j])),func(lambda_universe[j]),j,lambda_universe[j])]
         coeff_list = sorted(coeff_list, key = lambda tup: tup[0])
         j_index = coeff_list[-1][2]
         lambda_universe.pop(j_index)
         optimized_filters += [coeff_list[-1][1]]
+        resolved_coeffs += [coeff_list[-1][-1]]
+
+    print("optimization coefficients")
+    print(resolved_coeffs)
 
     print("optimized filters")
     print(np.array(optimized_filters).shape)
@@ -165,6 +170,47 @@ def preselect_filters(filter_matrix, targ_function, x_vector, lambda_universe, f
 
     return np.array(optimized_filters)
 
+
+#Idea:
+#Step 1: Find the filter that maximizes the norm of the convolution w/ signal
+#Step 2, find the dilation/ shift parameters that minimize the reconstruction error with respect to a single filter
+#Step 3: Find the coefficient that minimizes the residual norm of the convolved function and the dilated/shifted function
+#Step 4: Subtract from the residual, Iterate this process until all filters are been optimized.
+#Idea: Should we also consider a way to do this where this process is somehow automated.
+#Is there a way to do it where We just give it Sin and Cos and it finds the right combination that optimizes the selections?
+def preselect_filters_OBP(filter_matrix, targ_function, x_vector, lambda_universe, filter_func_list):
+
+    def convolution_norm(high_pass_filt):
+        f_conv = signal.convolve(targ_function,high_pass_filt, mode = "same")
+
+        return np.linalg.norm(f_conv)
+    
+    def reconstruction_norm_scaled(high_pass_filt,func):
+        f_conv = signal.convolve(func,high_pass_filt, mode = "same")
+        f_double = signal.convolve(f_conv,high_pass_filt, mode = "same")
+        normalized_f = f_double/np.linalg.norm(high_pass_filt)**2
+        resid_func = func - normalized_f
+        resid_num = np.linalg.norm(func - normalized_f)
+        return [resid_func, resid_num]
+    
+    recon_norms = [(filt, convolution_norm(filt),func) for filt,func in zip(filter_matrix,filter_func_list)]
+    norm_sorted_filts = sorted(recon_norms, key = lambda tup:tup[1], reverse=True)
+
+    #greedy algorithm
+    new_high_pass_list = []
+    resid = targ_function
+    for i in range(0,len(norm_sorted_filts)):
+        max_lambda = []
+        for j in range(0,lambda_universe):
+            #retrives the highpass filter associated with lambda[j]
+            lamb_j = lambda_universe[j]
+            coeff_j = norm_sorted_filts[i][2](lamb_j)
+            resid_func, resid_num = reconstruction_norm_scaled(coeff_j,resid)
+            max_lambda.append((coeff_j, resid_func, resid_num))
+        sorted(max_lambda, key = lambda tup: tup[2], reverse=True)
+        new_high_pass, resid_func,resid_num = max_lambda[0]
+        new_high_pass_list.append(new_high_pass)
+        #Need to add sub-routine here that optimizes the scalar for the projection
 
     """f_conv = signal.convolve(targ_function,sorted_filters_only[0], mode = "same")
     reconstructed_func = signal.convolve(f_conv,sorted_filters_only[0],mode = 'same')
@@ -214,9 +260,9 @@ if __name__ == "__main__":
     x2 = np.linspace(-6, 6, 17)
     x3 = np.linspace(-9, 9, 17)
 
-    lambda_step  = 0.3/10
+    lambda_step  = 0.15/10
 
-    lambda_universe = [lambda_step*i + lambda_vec_init[0] for i in range(100)]
+    lambda_universe = [lambda_step*i + 0.5*lambda_vec_init[0] for i in range(300)]
 
 
     cos_filter_bank = define_cosine_filters(x1,sigma1,cos_lambda_array,cos_psi_array)
@@ -233,6 +279,9 @@ if __name__ == "__main__":
 
     x= np.linspace(-2,2,24000)
     f = ((x**2)*np.sin(x**-2))/(np.exp((0.01)*(x**2)))
+
+    for i in range(0,len(high_pass_filters)):
+        high_pass_filters[i] = high_pass_filters[i] - np.mean(high_pass_filters[i])
 
 
     high_pass_filters = preselect_filters(high_pass_filters, f, x, lambda_universe, high_pass_functions)
@@ -406,3 +455,4 @@ if __name__ == "__main__":
     plt.show()
     plt.plot(x_vector_periodized_1, periodized_function_sin_1)
     plt.show()'''
+
